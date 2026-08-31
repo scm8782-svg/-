@@ -102,7 +102,7 @@ async function main() {
     await webpush.sendNotification(
       subscription,
       JSON.stringify({ title: "🔔 테스트 알림", body: "알림 설정 완료! 한도 70%·90% 도달 시 이렇게 알려드려요.", tag: "claude-usage-test" }),
-      { TTL: 3600 }
+      { TTL: 3600, urgency: "high" }
     );
     console.log("테스트 알림 발송 완료");
     return;
@@ -128,7 +128,7 @@ async function main() {
   let sent = 0;
   for (const a of alerts) {
     try {
-      await webpush.sendNotification(subscription, JSON.stringify(alertMessage(a)), { TTL: 3600 });
+      await webpush.sendNotification(subscription, JSON.stringify(alertMessage(a)), { TTL: 3600, urgency: "high" });
       console.log(`알림 발송: ${a.label} ${a.pct}% (임계 ${a.threshold}%)`);
       sent++;
     } catch (e) {

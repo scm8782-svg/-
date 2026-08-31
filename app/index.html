@@ -388,8 +388,22 @@ async function renderNotify(showSetup = false) {
   if (registered && !showSetup) {
     body.innerHTML = `
       <span class="ok">✅ 알림이 켜져 있어요</span> (70%·90% 도달 시 발송)<br><br>
+      <button id="btn-local">🔔 이 기기에서 알림 미리보기</button>
       <button id="btn-show">구독 정보 다시 보기</button>
       <button id="btn-unsub">알림 끄기</button>`;
+    $("btn-local").onclick = async () => {
+      // 서버를 거치지 않고 폰에서 직접 알림 표시 → 표시 설정 자체를 점검
+      try {
+        await reg.showNotification("🔔 미리보기 알림", {
+          body: "이 알림이 보이면 폰의 알림 표시 설정은 정상이에요.",
+          tag: "local-test",
+          icon: "icon.svg",
+        });
+        $("btn-local").textContent = "✅ 표시 요청함 - 상태표시줄 확인";
+      } catch (e) {
+        $("btn-local").textContent = "❌ 실패: " + (e.message || e);
+      }
+    };
     $("btn-show").onclick = () => renderNotify(true);
     $("btn-unsub").onclick = async () => {
       await (await reg.pushManager.getSubscription())?.unsubscribe();
