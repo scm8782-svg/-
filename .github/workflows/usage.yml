@@ -2,8 +2,9 @@ name: Claude 사용량 갱신
 
 on:
   schedule:
-    # 5분 간격. GitHub cron 특성상 실제로는 몇 분씩 밀려 5~10분 간격이 될 수 있음.
-    - cron: "*/5 * * * *"
+    # 30분 간격 (정시 혼잡을 피해 7분/37분). 5분 간격은 GitHub 무료 cron 에서
+    # 아예 실행되지 않는 사례가 있어 완화함. 실제 실행은 몇 분씩 밀릴 수 있음.
+    - cron: "7,37 * * * *"
   workflow_dispatch:
     inputs:
       test_alert:
