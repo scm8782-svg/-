@@ -3,7 +3,7 @@
 Claude 구독(Pro/Max)의 **5시간 세션 사용량**과 **주간 한도**를 핸드폰에서 한눈에 보는 개인용 앱입니다.
 
 ```
-[GitHub Actions] --30분마다--> Anthropic 사용량 API 조회 --> usage.json
+[GitHub Actions] --5분마다--> Anthropic 사용량 API 조회 --> usage.json
         └--> GitHub Pages 배포 --> 📱 폰 홈 화면의 웹앱이 표시
 ```
 
@@ -66,7 +66,7 @@ claude setup-token
 2. 성공하면 앱 주소가 열립니다: `https://<계정명>.github.io/<저장소명>/`
 3. 폰(Android Chrome)에서 그 주소 접속 → 메뉴(⋮) → **"홈 화면에 추가"**
 
-이후에는 30분마다 자동으로 갱신됩니다. 앱을 열면 1분마다 최신 데이터를 다시 확인합니다.
+이후에는 5분마다 자동으로 갱신됩니다(GitHub cron 특성상 실제로는 5~10분 간격). 앱을 열면 1분마다 최신 데이터를 다시 확인합니다.
 
 ---
 
@@ -96,4 +96,4 @@ python3 -m http.server 8000 --directory app
 | `HTTP 401` 반복 | 토큰 만료/로그아웃. 컴퓨터에서 Claude Code 재로그인(또는 `claude setup-token` 재발급) 후 Secret을 새 값으로 교체 |
 | `HTTP 429` | 비공식 API의 속도 제한. 워크플로가 자동으로 1회 재시도하며, 계속되면 다음 주기에 정상화되는 경우가 대부분 |
 | "데이터가 오래됐어요" 배너 | 90분 이상 갱신이 없음. GitHub cron이 밀렸거나(흔함) 워크플로 실패. Actions 탭 확인 |
-| 갱신 주기를 바꾸고 싶다 | `.github/workflows/usage.yml`의 `cron` 값 수정 (예: 15분마다 `"7,22,37,52 * * * *"`) |
+| 갱신 주기를 바꾸고 싶다 | `.github/workflows/usage.yml`의 `cron` 값 수정 (예: 30분마다 `"7,37 * * * *"`) — 429가 잦으면 간격을 늘려 보세요 |

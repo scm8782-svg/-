@@ -2,8 +2,8 @@ name: Claude 사용량 갱신
 
 on:
   schedule:
-    # 30분 간격 (정시 혼잡을 피해 7분/37분에 실행). GitHub 사정으로 몇 분씩 늦을 수 있음.
-    - cron: "7,37 * * * *"
+    # 5분 간격. GitHub cron 특성상 실제로는 몇 분씩 밀려 5~10분 간격이 될 수 있음.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
