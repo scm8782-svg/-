@@ -50,12 +50,29 @@ jobs:
               || { echo "이전 토큰 상태를 복호화하지 못해 무시합니다(시크릿이 바뀌었을 수 있음)."; rm -f state.json; }
           fi
 
+      # 조회가 실패해도(예: Anthropic 429) 앱 배포는 계속되어야 한다.
       - name: 사용량 조회
+        id: fetch
+        continue-on-error: true
         env:
           CLAUDE_CREDENTIALS: ${{ secrets.CLAUDE_CREDENTIALS }}
           STATE_FILE: state.json
           OUT: _site/usage.json
         run: node scripts/fetch-usage.mjs
+
+      # 조회 실패 시 현재 배포돼 있는 usage.json 을 그대로 유지한다.
+      - name: 조회 실패 시 기존 데이터 유지
+        if: ${{ steps.fetch.outcome == 'failure' }}
+        run: |
+          mkdir -p _site
+          OWNER="${GITHUB_REPOSITORY%%/*}"; NAME="${GITHUB_REPOSITORY#*/}"
+          URL="https://${OWNER}.github.io/${NAME}/usage.json"
+          echo "사용량 조회 실패 - 기존 데이터를 유지합니다: $URL"
+          if curl -fsSL --max-time 30 "$URL" -o _site/usage.json; then
+            echo "기존 usage.json 을 가져왔습니다."
+          else
+            echo "기존 데이터도 없습니다. usage.json 없이 배포합니다."
+          fi
 
       - name: 사이트 구성
         run: cp -r app/. _site/
@@ -83,7 +100,9 @@ jobs:
           NOTIFY_STATE_FILE: notify-state.json
           TEST_ALERT: ${{ inputs.test_alert && 'true' || '' }}
         run: |
-          if [ -n "$PUSH_SUBSCRIPTION" ]; then
+          if [ ! -f "$USAGE_FILE" ]; then
+            echo "usage.json 이 없어 알림을 건너뜁니다."
+          elif [ -n "$PUSH_SUBSCRIPTION" ]; then
             [ -d node_modules/web-push ] || npm install --no-save --no-audit --no-fund web-push@3.6.7
             node scripts/send-alerts.mjs
           else
@@ -123,3 +142,8 @@ jobs:
       - name: Pages 배포
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: 조회 실패 여부 알림
+        if: ${{ steps.fetch.outcome == 'failure' }}
+        run: |
+          echo "::warning::사용량 조회에 실패했습니다(앱은 정상 배포됨). 다음 주기에 다시 시도합니다."

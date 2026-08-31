@@ -142,3 +142,53 @@ test("장기 토큰이면 상태를 저장하지 않는다", async () => {
   const { state } = await run({ secretRaw: "sk-ant-oat01-x", fetchImpl: f });
   assert.equal(state, null);
 });
+
+test("토큰 갱신이 429 면 백오프 후 재시도한다", async () => {
+  let tokenCalls = 0;
+  const slept = [];
+  const f = mockFetch([
+    {
+      match: "/v1/oauth/token",
+      respond: () =>
+        ++tokenCalls < 3
+          ? jsonRes(429, { error: { type: "rate_limit_error" } })
+          : jsonRes(200, { access_token: "at-ok", expires_in: 28800 }),
+    },
+    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+  ]);
+  const now = Date.now();
+  const creds = { accessToken: "old", refreshToken: "rt", expiresAt: now - 1, static: false };
+  const { creds: updated } = await fetchUsage(creds, f, {
+    now,
+    sleepImpl: async (ms) => void slept.push(ms),
+    refreshRetryDelays: [1, 2, 3],
+  });
+  assert.equal(updated.accessToken, "at-ok");
+  assert.equal(tokenCalls, 3);
+  assert.deepEqual(slept, [1, 2]); // 두 번 실패 → 두 번 대기
+});
+
+test("토큰 갱신 429 가 재시도 횟수를 넘으면 실패한다", async () => {
+  const f = mockFetch([
+    { match: "/v1/oauth/token", respond: () => jsonRes(429, { error: "rate" }) },
+    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+  ]);
+  const now = Date.now();
+  const creds = { accessToken: "old", refreshToken: "rt", expiresAt: now - 1, static: false };
+  await assert.rejects(
+    () => fetchUsage(creds, f, { now, sleepImpl: async () => {}, refreshRetryDelays: [1] }),
+    /토큰 갱신 실패: HTTP 429/
+  );
+});
+
+test("토큰 갱신이 429 아닌 오류면 즉시 실패한다", async () => {
+  let tokenCalls = 0;
+  const f = mockFetch([
+    { match: "/v1/oauth/token", respond: () => (tokenCalls++, jsonRes(400, { error: "invalid_grant" })) },
+    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+  ]);
+  const now = Date.now();
+  const creds = { accessToken: "old", refreshToken: "rt", expiresAt: now - 1, static: false };
+  await assert.rejects(() => fetchUsage(creds, f, { now, sleepImpl: async () => {} }), /HTTP 400/);
+  assert.equal(tokenCalls, 1); // 재시도 없음
+});

@@ -61,17 +61,28 @@ function maskInLogs(value) {
   }
 }
 
-export async function refreshToken(creds, fetchImpl, now = Date.now()) {
-  const res = await fetchImpl(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "User-Agent": "anthropic" },
-    body: JSON.stringify({
-      grant_type: "refresh_token",
-      refresh_token: creds.refreshToken,
-      client_id: CLIENT_ID,
-    }),
-  });
-  if (!res.ok) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export async function refreshToken(creds, fetchImpl, now = Date.now(), opts = {}) {
+  // 토큰 엔드포인트도 429 를 자주 돌려주므로 백오프 재시도한다.
+  const { sleepImpl = sleep, retryDelays = [5_000, 15_000, 45_000] } = opts;
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetchImpl(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": "anthropic" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: creds.refreshToken,
+        client_id: CLIENT_ID,
+      }),
+    });
+    if (res.ok) break;
+    if (res.status === 429 && attempt < retryDelays.length) {
+      console.warn(`토큰 갱신 429 - ${retryDelays[attempt] / 1000}초 후 재시도`);
+      await sleepImpl(retryDelays[attempt]);
+      continue;
+    }
     const body = await res.text().catch(() => "");
     throw new Error(`토큰 갱신 실패: HTTP ${res.status} ${body.slice(0, 200)}`);
   }
@@ -86,8 +97,6 @@ export async function refreshToken(creds, fetchImpl, now = Date.now()) {
     static: false,
   };
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function getUsageOnce(token, fetchImpl, ua) {
   return fetchImpl(USAGE_URL, {
@@ -107,14 +116,15 @@ async function getUsageOnce(token, fetchImpl, ua) {
  * @returns {Promise<{creds: object, data: object}>}
  */
 export async function fetchUsage(creds, fetchImpl, opts = {}) {
-  const { now = Date.now(), ua = DEFAULT_UA, retryDelayMs = 35_000, sleepImpl = sleep } = opts;
+  const { now = Date.now(), ua = DEFAULT_UA, retryDelayMs = 35_000, sleepImpl = sleep, refreshRetryDelays } = opts;
+  const refreshOpts = { sleepImpl, ...(refreshRetryDelays ? { retryDelays: refreshRetryDelays } : {}) };
   let current = { ...creds };
   if (needsRefresh(current, now)) {
-    current = await refreshToken(current, fetchImpl, now);
+    current = await refreshToken(current, fetchImpl, now, refreshOpts);
   }
   let res = await getUsageOnce(current.accessToken, fetchImpl, ua);
   if (res.status === 401 && current.refreshToken) {
-    current = await refreshToken(current, fetchImpl, now);
+    current = await refreshToken(current, fetchImpl, now, refreshOpts);
     res = await getUsageOnce(current.accessToken, fetchImpl, ua);
   }
   if (res.status === 429) {
@@ -134,7 +144,7 @@ export async function fetchUsage(creds, fetchImpl, opts = {}) {
  * 전체 실행 흐름. STATE_FILE 의 상태(이전 실행에서 갱신된 토큰)를 우선 쓰고,
  * 그 상태가 죽어 있으면(예: 사용자가 시크릿을 새로 등록) 시크릿으로 폴백한다.
  */
-export async function run({ secretRaw, stateRaw = null, fetchImpl, now = Date.now(), ua, retryDelayMs, sleepImpl }) {
+export async function run({ secretRaw, stateRaw = null, fetchImpl, now = Date.now(), ua, retryDelayMs, sleepImpl, refreshRetryDelays }) {
   const fromSecret = parseCredentials(secretRaw);
   let attempts;
   if (stateRaw) {
@@ -152,7 +162,7 @@ export async function run({ secretRaw, stateRaw = null, fetchImpl, now = Date.no
   let lastErr;
   for (const creds of attempts) {
     try {
-      const { creds: finalCreds, data } = await fetchUsage(creds, fetchImpl, { now, ua, retryDelayMs, sleepImpl });
+      const { creds: finalCreds, data } = await fetchUsage(creds, fetchImpl, { now, ua, retryDelayMs, sleepImpl, refreshRetryDelays });
       return {
         output: { version: 1, fetched_at: new Date(now).toISOString(), data },
         state: finalCreds.static ? null : finalCreds,
