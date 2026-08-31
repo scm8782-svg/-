@@ -1,6 +1,6 @@
 // 오프라인에서도 앱 껍데기가 뜨도록 하는 최소한의 서비스 워커.
 // usage.json 은 항상 네트워크 우선(실패 시 캐시 폴백).
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (e) => {
@@ -13,6 +13,25 @@ self.addEventListener("activate", (e) => {
       .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+// 서버(GitHub Actions)가 보낸 한도 알림을 표시한다.
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data.json(); } catch {}
+  e.waitUntil(
+    self.registration.showNotification(d.title || "Claude 사용량", {
+      body: d.body || "",
+      tag: d.tag || "claude-usage",
+      icon: "icon.svg",
+      badge: "icon.svg",
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.openWindow("./"));
 });
 
 self.addEventListener("fetch", (e) => {

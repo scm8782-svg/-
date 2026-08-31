@@ -54,6 +54,42 @@ jobs:
       - name: 사이트 구성
         run: cp -r app/. _site/
 
+      # ── 한도 임박 푸시 알림 (PUSH_SUBSCRIPTION 시크릿이 있을 때만 동작) ──
+      - name: 알림 상태 캐시 복원
+        uses: actions/cache/restore@v4
+        with:
+          path: notify-state.json
+          key: notify-state-${{ github.run_id }}
+          restore-keys: |
+            notify-state-
+
+      - name: web-push 설치 캐시
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: webpush-3.6.7
+
+      - name: 한도 임박 알림 발송
+        env:
+          PUSH_SUBSCRIPTION: ${{ secrets.PUSH_SUBSCRIPTION }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          USAGE_FILE: _site/usage.json
+          NOTIFY_STATE_FILE: notify-state.json
+        run: |
+          if [ -n "$PUSH_SUBSCRIPTION" ]; then
+            [ -d node_modules/web-push ] || npm install --no-save --no-audit --no-fund web-push@3.6.7
+            node scripts/send-alerts.mjs
+          else
+            echo "PUSH_SUBSCRIPTION 미설정 - 알림 건너뜀"
+          fi
+
+      - name: 알림 상태 캐시 저장
+        if: ${{ hashFiles('notify-state.json') != '' }}
+        uses: actions/cache/save@v4
+        with:
+          path: notify-state.json
+          key: notify-state-${{ github.run_id }}
+
       - name: 토큰 상태 암호화 및 캐시 저장 준비
         env:
           CLAUDE_CREDENTIALS: ${{ secrets.CLAUDE_CREDENTIALS }}

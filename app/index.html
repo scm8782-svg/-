@@ -111,6 +111,22 @@
   .extra-note { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
 
   footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+  .notify-card { font-size: 13.5px; color: var(--ink-2); }
+  .notify-card h2 { font-size: 14px; font-weight: 600; color: var(--ink-2); margin: 0 0 8px; }
+  .notify-card button {
+    border: 1px solid var(--border); background: var(--page); color: var(--ink);
+    border-radius: 10px; padding: 8px 14px; font: inherit; font-size: 13.5px; cursor: pointer;
+  }
+  .notify-card button:active { opacity: .6; }
+  .notify-card textarea {
+    width: 100%; height: 72px; margin-top: 8px; font-size: 11px; color: var(--muted);
+    background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 6px;
+    resize: none;
+  }
+  .notify-card ol { margin: 8px 0 0; padding-left: 20px; }
+  .notify-card ol li { margin-bottom: 4px; }
+  .notify-card .ok { color: var(--good); font-weight: 600; }
+  .notify-card a { color: var(--accent); }
   #empty {
     display: none; text-align: left; color: var(--ink-2); font-size: 14px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px;
@@ -151,6 +167,11 @@
     저장소의 <code>Actions</code> 탭에서 <code>Claude 사용량 갱신</code> 워크플로를 수동 실행해 보세요.
     자세한 설정 방법은 저장소의 README를 참고하세요.
   </div>
+
+  <section id="notify-card" class="card notify-card" hidden>
+    <h2>🔔 한도 임박 알림</h2>
+    <div id="notify-body"></div>
+  </section>
 
   <footer>비공식 사용량 API 기준 · 자동 갱신 약 5분 간격</footer>
 </main>
@@ -313,6 +334,89 @@ load(true);
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
+
+// ── 한도 임박 푸시 알림 설정 ──────────────────────────────────
+const VAPID_PUBLIC_KEY = "BFnWFPeCWL9oQ3X2FAOlq2qsBbH3qQWyoJSQDZ4lF2jngb8TUJ9EusYIV50TfDoj0eRuyGOmUjSMhOW_1dNDlFU";
+
+// GitHub Pages 주소에서 저장소 Secret 페이지 주소를 유도
+function secretPageUrl() {
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+  const repo = location.pathname.split("/").filter(Boolean)[0];
+  if (m && repo) return `https://github.com/${m[1]}/${decodeURIComponent(repo)}/settings/secrets/actions`;
+  return null;
+}
+
+function b64ToU8(s) {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+const pushSupported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+async function renderNotify(showSetup = false) {
+  if (!pushSupported) return;
+  const card = $("notify-card");
+  const body = $("notify-body");
+  card.hidden = false;
+
+  if (Notification.permission === "denied") {
+    body.innerHTML = `알림 권한이 차단되어 있어요.<br>브라우저 설정 → 사이트 설정 → 알림에서 이 사이트를 허용해 주세요.`;
+    return;
+  }
+
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  const registered = localStorage.getItem("push-registered") === "1";
+  const secretUrl = secretPageUrl();
+
+  if (!sub) {
+    body.innerHTML = `
+      사용량이 <strong>70% · 90%</strong>를 넘으면 폰으로 알림을 보내드려요.<br><br>
+      <button id="btn-sub">알림 켜기</button>`;
+    $("btn-sub").onclick = async () => {
+      try {
+        if ((await Notification.requestPermission()) !== "granted") { renderNotify(); return; }
+        await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(VAPID_PUBLIC_KEY) });
+        localStorage.removeItem("push-registered");
+        renderNotify(true);
+      } catch { body.innerHTML = "구독에 실패했어요. 잠시 후 다시 시도해 주세요."; }
+    };
+    return;
+  }
+
+  if (registered && !showSetup) {
+    body.innerHTML = `
+      <span class="ok">✅ 알림이 켜져 있어요</span> (70%·90% 도달 시 발송)<br><br>
+      <button id="btn-show">구독 정보 다시 보기</button>
+      <button id="btn-unsub">알림 끄기</button>`;
+    $("btn-show").onclick = () => renderNotify(true);
+    $("btn-unsub").onclick = async () => {
+      await (await reg.pushManager.getSubscription())?.unsubscribe();
+      localStorage.removeItem("push-registered");
+      renderNotify();
+    };
+    return;
+  }
+
+  // 구독은 됐고, 서버(GitHub Secret) 등록 안내가 필요한 상태
+  const json = JSON.stringify(sub.toJSON());
+  body.innerHTML = `
+    마지막 한 단계! 아래 <strong>구독 정보</strong>를 GitHub에 등록해야 알림이 발송돼요.
+    <ol>
+      <li><button id="btn-copy">📋 구독 정보 복사</button></li>
+      <li>${secretUrl ? `<a href="${secretUrl}/new" target="_blank" rel="noopener">Secret 등록 페이지 열기</a>` : "저장소 Settings → Secrets → Actions"}</li>
+      <li>Name: <code>PUSH_SUBSCRIPTION</code> / Secret: 붙여넣기 → Add secret</li>
+      <li><button id="btn-done">등록 완료했어요</button></li>
+    </ol>
+    <textarea readonly id="sub-json">${json.replace(/</g, "&lt;")}</textarea>`;
+  $("btn-copy").onclick = async () => {
+    try { await navigator.clipboard.writeText(json); $("btn-copy").textContent = "✅ 복사됨"; }
+    catch { $("sub-json").select(); document.execCommand("copy"); $("btn-copy").textContent = "✅ 복사됨"; }
+  };
+  $("btn-done").onclick = () => { localStorage.setItem("push-registered", "1"); renderNotify(); };
+}
+renderNotify();
 </script>
 </body>
 </html>

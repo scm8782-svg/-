@@ -2,4 +2,7 @@ node_modules/
 _site/
 state.json
 state.enc
+notify-state.json
+package.json
+package-lock.json
 app/usage.json
