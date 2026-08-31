@@ -5,6 +5,11 @@ on:
     # 5분 간격. GitHub cron 특성상 실제로는 몇 분씩 밀려 5~10분 간격이 될 수 있음.
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      test_alert:
+        description: "테스트 푸시 알림 보내기"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -75,6 +80,7 @@ jobs:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           USAGE_FILE: _site/usage.json
           NOTIFY_STATE_FILE: notify-state.json
+          TEST_ALERT: ${{ inputs.test_alert && 'true' || '' }}
         run: |
           if [ -n "$PUSH_SUBSCRIPTION" ]; then
             [ -d node_modules/web-push ] || npm install --no-save --no-audit --no-fund web-push@3.6.7

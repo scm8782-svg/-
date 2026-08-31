@@ -94,6 +94,20 @@ async function main() {
     return;
   }
 
+  // 테스트 모드: 임계값과 무관하게 알림 1건을 바로 보낸다.
+  if (process.env.TEST_ALERT === "true") {
+    const subscription = JSON.parse(subRaw);
+    const { default: webpush } = await import("web-push");
+    webpush.setVapidDetails("mailto:noreply@example.com", VAPID_PUBLIC_KEY, priv);
+    await webpush.sendNotification(
+      subscription,
+      JSON.stringify({ title: "🔔 테스트 알림", body: "알림 설정 완료! 한도 70%·90% 도달 시 이렇게 알려드려요.", tag: "claude-usage-test" }),
+      { TTL: 3600 }
+    );
+    console.log("테스트 알림 발송 완료");
+    return;
+  }
+
   const usagePath = process.env.USAGE_FILE || "_site/usage.json";
   const statePath = process.env.NOTIFY_STATE_FILE || "notify-state.json";
   const usage = JSON.parse(await readFile(usagePath, "utf8"));
