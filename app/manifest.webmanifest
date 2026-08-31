@@ -1,0 +1,14 @@
+{
+  "name": "Claude 사용량",
+  "short_name": "Claude 한도",
+  "description": "Claude 구독의 사용량 한도(5시간 세션·주간)를 보여주는 개인용 대시보드",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d0d0d",
+  "theme_color": "#1a1a19",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Claude 사용량</title>
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --track: #e1e0d9;
+    --border: rgba(11, 11, 11, 0.10);
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --accent: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --track: #2c2c2a;
+      --border: rgba(255, 255, 255, 0.10);
+      --accent: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.45;
+    padding: max(12px, env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+    -webkit-tap-highlight-color: transparent;
+  }
+  main { max-width: 460px; margin: 0 auto; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 2px 14px;
+  }
+  header h1 { font-size: 18px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px; }
+  header h1 svg { flex: none; }
+  #updated { color: var(--muted); font-size: 12.5px; }
+  #refresh-btn {
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+    border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px;
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+  }
+  #refresh-btn:active { opacity: .6; }
+  #refresh-btn.spinning svg { animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .banner {
+    border-radius: 12px; padding: 10px 14px; margin: 0 0 12px; font-size: 13.5px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+    display: none;
+  }
+  .banner.show { display: block; }
+  .banner strong { color: var(--ink); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px 18px 18px;
+    margin-bottom: 12px;
+  }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .card-title { font-size: 14px; font-weight: 600; color: var(--ink-2); margin: 0; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12.5px; font-weight: 600; color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .chip svg { flex: none; }
+
+  .value-row { display: flex; align-items: baseline; gap: 6px; margin: 6px 0 10px; }
+  .value { font-size: 38px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+  .value .unit { font-size: 20px; font-weight: 600; color: var(--ink-2); }
+  .remain { font-size: 13px; color: var(--muted); margin-left: auto; text-align: right; }
+
+  .meter { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+  .meter > i {
+    display: block; height: 100%; border-radius: 4px;
+    background: var(--accent); width: 0%;
+    transition: width .5s ease;
+    min-width: 0;
+  }
+  .meter > i.nonzero { min-width: 8px; }
+
+  .reset-line { margin-top: 10px; font-size: 13px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 8px; }
+  .reset-line .abs { color: var(--muted); }
+
+  .extra-note { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
+
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+  #empty {
+    display: none; text-align: left; color: var(--ink-2); font-size: 14px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px;
+  }
+  #empty.show { display: block; }
+  #empty code { background: var(--track); border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 17a8 8 0 1 1 16 0" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M12 17 15.5 10" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round"/>
+        <circle cx="12" cy="17" r="1.7" fill="var(--ink)"/>
+      </svg>
+      Claude 사용량
+      <span id="plan" style="font-size:12px;font-weight:600;color:var(--muted)"></span>
+    </h1>
+    <button id="refresh-btn" type="button" aria-label="새로고침">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span id="updated">-</span>
+    </button>
+  </header>
+
+  <div id="stale" class="banner"><strong>⚠️ 데이터가 오래됐어요.</strong> <span id="stale-msg"></span></div>
+  <div id="offline" class="banner">📴 오프라인이에요. 마지막으로 받아둔 데이터를 보여줍니다.</div>
+
+  <div id="cards"></div>
+
+  <div id="empty">
+    <strong>아직 사용량 데이터가 없어요.</strong><br><br>
+    GitHub Actions 워크플로가 아직 실행되지 않았거나 실패했을 수 있어요.<br>
+    저장소의 <code>Actions</code> 탭에서 <code>Claude 사용량 갱신</code> 워크플로를 수동 실행해 보세요.
+    자세한 설정 방법은 저장소의 README를 참고하세요.
+  </div>
+
+  <footer>비공식 사용량 API 기준 · 자동 갱신 약 30분 간격</footer>
+</main>
+
+<script>
+"use strict";
+// ── 상태 판정: 아이콘 + 라벨을 항상 함께 표시(색만으로 의미 전달 금지) ──
+const STATUS = [
+  { max: 50,  key: "good",     label: "여유",       color: "var(--good)",
+    icon: '<circle cx="8" cy="8" r="6.5" fill="COLOR"/><path d="M5 8.2 7.2 10.4 11 5.8" stroke="var(--surface)" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' },
+  { max: 80,  key: "warning",  label: "주의",       color: "var(--warning)",
+    icon: '<path d="M8 1.5 15 14H1z" fill="COLOR"/><rect x="7.2" y="6" width="1.6" height="4" rx="0.8" fill="var(--surface)"/><circle cx="8" cy="12" r="0.9" fill="var(--surface)"/>' },
+  { max: 95,  key: "serious",  label: "한도 임박",  color: "var(--serious)",
+    icon: '<circle cx="8" cy="8" r="6.5" fill="COLOR"/><rect x="7.2" y="4" width="1.6" height="5" rx="0.8" fill="var(--surface)"/><circle cx="8" cy="11.4" r="0.9" fill="var(--surface)"/>' },
+  { max: 1e9, key: "critical", label: "거의 소진",  color: "var(--critical)",
+    icon: '<path d="M5 1.5h6L15 5v6l-4 3.5H5L1 11V5z" fill="COLOR"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="var(--surface)" stroke-width="1.6" stroke-linecap="round"/>' },
+];
+const statusOf = (pct) => STATUS.find((s) => pct < s.max) ?? STATUS[STATUS.length - 1];
+
+// 표시할 사용량 창(window) 정의 - 알 수 없는 키는 아래에서 자동 처리
+const KNOWN = [
+  { key: "five_hour",        title: "5시간 세션",       resetVerb: "세션 초기화" },
+  { key: "seven_day",        title: "주간 · 전체 모델", resetVerb: "주간 초기화" },
+  { key: "seven_day_opus",   title: "주간 · Opus",      resetVerb: "주간 초기화" },
+  { key: "seven_day_sonnet", title: "주간 · Sonnet",    resetVerb: "주간 초기화" },
+];
+const SKIP_KEYS = new Set(["extra_usage", ...KNOWN.map((w) => w.key)]);
+
+const $ = (id) => document.getElementById(id);
+const fmtTime = new Intl.DateTimeFormat("ko-KR", { hour: "numeric", minute: "2-digit" });
+const fmtDay  = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric", weekday: "short", hour: "numeric", minute: "2-digit" });
+
+function relRemain(iso, now) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  let s = Math.max(0, Math.round((t - now) / 1000));
+  const d = Math.floor(s / 86400); s -= d * 86400;
+  const h = Math.floor(s / 3600);  s -= h * 3600;
+  const m = Math.ceil(s / 60);
+  if (d > 0) return `${d}일 ${h}시간 후`;
+  if (h > 0) return `${h}시간 ${m}분 후`;
+  if (m > 0) return `${m}분 후`;
+  return "곧";
+}
+function absReset(iso, now) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  return (t - now < 22 * 3600 * 1000 ? fmtTime : fmtDay).format(t);
+}
+function agoText(iso, now) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "-";
+  const m = Math.round((now - t) / 60000);
+  if (m < 1) return "방금 갱신";
+  if (m < 60) return `${m}분 전 갱신`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}시간 전 갱신`;
+  return `${Math.floor(h / 24)}일 전 갱신`;
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function windowCard(title, w, resetVerb, now) {
+  if (!w || typeof w.utilization !== "number") return "";
+  const pct = Math.max(0, Math.min(100, w.utilization));
+  const st = statusOf(pct);
+  const remain = w.resets_at ? relRemain(w.resets_at, now) : null;
+  return `
+  <section class="card">
+    <div class="card-head">
+      <h2 class="card-title">${esc(title)}</h2>
+      <span class="chip"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">${st.icon.replaceAll("COLOR", st.color)}</svg>${st.label}</span>
+    </div>
+    <div class="value-row">
+      <span class="value">${pct % 1 ? pct.toFixed(1) : pct}<span class="unit">%</span></span>
+      <span class="remain">남은 한도 ${(100 - pct) % 1 ? (100 - pct).toFixed(1) : 100 - pct}%</span>
+    </div>
+    <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${esc(title)} 사용량">
+      <i class="${pct > 0 ? "nonzero" : ""}" style="width:${pct}%;background:${st.color}"></i>
+    </div>
+    ${w.resets_at ? `<div class="reset-line"><span>${remain ? `${esc(remain)} ${esc(resetVerb)}` : esc(resetVerb)}</span><span class="abs">${esc(absReset(w.resets_at, now))}</span></div>` : ""}
+  </section>`;
+}
+
+function extraCard(x) {
+  if (!x || !x.is_enabled) return "";
+  const used = typeof x.used_credits === "number" ? x.used_credits : null;
+  const limit = typeof x.monthly_limit === "number" ? x.monthly_limit : null;
+  const pct = typeof x.utilization === "number" ? Math.max(0, Math.min(100, x.utilization)) : null;
+  const st = statusOf(pct ?? 0);
+  const money = (v) => `$${(v / 100).toFixed(2)}`; // used_credits 는 센트 단위로 알려져 있음
+  return `
+  <section class="card">
+    <div class="card-head">
+      <h2 class="card-title">추가 사용량 (Extra usage)</h2>
+      ${pct != null ? `<span class="chip"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">${st.icon.replaceAll("COLOR", st.color)}</svg>${st.label}</span>` : ""}
+    </div>
+    ${pct != null ? `
+    <div class="value-row"><span class="value">${pct % 1 ? pct.toFixed(1) : pct}<span class="unit">%</span></span></div>
+    <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="추가 사용량">
+      <i class="${pct > 0 ? "nonzero" : ""}" style="width:${pct}%;background:${st.color}"></i>
+    </div>` : ""}
+    ${used != null && limit != null ? `<p class="extra-note">이번 달 ${money(used)} / ${money(limit)} 사용</p>`
+      : used != null ? `<p class="extra-note">이번 달 ${money(used)} 사용</p>`
+      : `<p class="extra-note">추가 사용량이 활성화되어 있어요.</p>`}
+  </section>`;
+}
+
+let last = null; // 마지막으로 성공한 usage.json
+
+function render() {
+  const now = Date.now();
+  if (!last) { $("empty").classList.add("show"); return; }
+  $("empty").classList.remove("show");
+
+  const d = last.data ?? {};
+  let html = "";
+  for (const w of KNOWN) html += windowCard(w.title, d[w.key], w.resetVerb, now);
+  // 새로 생긴(모르는) 창도 형태가 맞으면 그대로 표시
+  for (const [k, v] of Object.entries(d)) {
+    if (!SKIP_KEYS.has(k) && v && typeof v === "object" && typeof v.utilization === "number") {
+      html += windowCard(k.replaceAll("_", " "), v, "초기화", now);
+    }
+  }
+  html += extraCard(d.extra_usage);
+  $("cards").innerHTML = html;
+
+  $("updated").textContent = agoText(last.fetched_at, now);
+  const ageMin = (now - Date.parse(last.fetched_at)) / 60000;
+  const stale = Number.isFinite(ageMin) && ageMin > 90;
+  $("stale").classList.toggle("show", stale);
+  if (stale) $("stale-msg").textContent = `마지막 갱신이 ${Math.round(ageMin)}분 전이에요. GitHub Actions 실행 상태를 확인해 보세요.`;
+}
+
+async function load(manual = false) {
+  const btn = $("refresh-btn");
+  if (manual) btn.classList.add("spinning");
+  try {
+    const res = await fetch(`usage.json?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    last = await res.json();
+    try { localStorage.setItem("usage-cache", JSON.stringify(last)); } catch {}
+    $("offline").classList.remove("show");
+  } catch {
+    if (!last) { // 네트워크 실패 시 로컬 캐시 폴백
+      try { last = JSON.parse(localStorage.getItem("usage-cache")); } catch {}
+    }
+    $("offline").classList.toggle("show", !navigator.onLine || !!last);
+  } finally {
+    if (manual) btn.classList.remove("spinning");
+  }
+  render();
+}
+
+$("refresh-btn").addEventListener("click", () => load(true));
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+setInterval(() => load(), 60_000);      // 1분마다 새 데이터 확인
+setInterval(render, 30_000);            // 카운트다운/상대시간 갱신
+load(true);
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
