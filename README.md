@@ -75,6 +75,20 @@ claude setup-token
 
 ---
 
+## 즉시 갱신 (선택)
+
+기본 상태에서 앱의 새로고침 버튼은 **저장된 `usage.json` 을 다시 읽기만** 합니다.
+버튼을 누를 때 실제로 새로 조회하게 하려면:
+
+1. [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) 생성
+   - Repository access: 이 저장소만 선택
+   - Permissions → **Actions: Read and write**
+2. 앱의 **"⚡ 즉시 갱신"** 카드에 토큰을 붙여넣고 저장
+
+이후 새로고침을 누르면 워크플로가 실행되고, 새 데이터가 배포될 때까지(20~60초)
+기다렸다가 화면이 갱신됩니다. 토큰은 그 기기의 `localStorage` 에만 저장되며
+저장소나 배포된 페이지에는 포함되지 않습니다.
+
 ## 한도 임박 푸시 알림 (선택)
 
 사용량이 **70% / 90%**를 넘는 순간 폰 상태표시줄로 알림을 받을 수 있어요. (리셋 후 다시 넘으면 또 알림)

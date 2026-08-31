@@ -1,6 +1,6 @@
 // 오프라인에서도 앱 껍데기가 뜨도록 하는 최소한의 서비스 워커.
 // usage.json 은 항상 네트워크 우선(실패 시 캐시 폴백).
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (e) => {
