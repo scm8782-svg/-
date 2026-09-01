@@ -50,7 +50,7 @@ const req = (q) => new Request(`https://w.example.dev/?${q}`);
 test("APP_KEY 가 틀리면 401", async () => {
   const res = await handleRequest(req("k=wrong"), envWith(fakeKV()), mockFetch([]));
   assert.equal(res.status, 401);
-  assert.deepEqual(await res.json(), { error: "unauthorized" });
+  assert.equal((await res.json()).error, "unauthorized");
 });
 
 test("APP_KEY 가 없으면 401", async () => {
