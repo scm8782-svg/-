@@ -6,3 +6,5 @@ notify-state.json
 package.json
 package-lock.json
 app/usage.json
+worker/node_modules/
+worker/.wrangler/

@@ -75,19 +75,21 @@ claude setup-token
 
 ---
 
-## 즉시 갱신 (선택)
+## 즉시 갱신 · 빠른 자동 갱신 (권장)
 
 기본 상태에서 앱의 새로고침 버튼은 **저장된 `usage.json` 을 다시 읽기만** 합니다.
-버튼을 누를 때 실제로 새로 조회하게 하려면:
+**Cloudflare Worker** 를 연결하면 폰이 Worker 를 통해 Anthropic 을 직접 조회해
+**1~2초** 만에 최신값이 뜨고, Worker 자체 스케줄러가 5분마다 갱신해 줍니다.
 
-1. [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) 생성
-   - Repository access: 이 저장소만 선택
-   - Permissions → **Actions: Read and write**
-2. 앱의 **"⚡ 즉시 갱신"** 카드에 토큰을 붙여넣고 저장
+```
+폰 앱 --(1~2초)--> Cloudflare Worker --> Anthropic
+```
 
-이후 새로고침을 누르면 워크플로가 실행되고, 새 데이터가 배포될 때까지(20~60초)
-기다렸다가 화면이 갱신됩니다. 토큰은 그 기기의 `localStorage` 에만 저장되며
-저장소나 배포된 페이지에는 포함되지 않습니다.
+설정 방법은 [`worker/README.md`](worker/README.md) 를 따라가세요 (약 10분).
+완성한 뒤 앱의 **"⚡ 즉시 갱신"** 카드에 Worker 주소와 APP_KEY 를 입력하면 됩니다.
+입력값은 그 기기의 `localStorage` 에만 저장됩니다.
+
+> Worker 없이도 앱은 그대로 동작합니다 — GitHub Actions 가 배포한 `usage.json` 을 읽습니다.
 
 ## 한도 임박 푸시 알림 (선택)
 

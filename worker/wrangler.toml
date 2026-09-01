@@ -1,0 +1,13 @@
+name = "claude-usage"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+
+# 5분마다 미리 조회해 캐시를 데워 둔다.
+[triggers]
+crons = ["*/5 * * * *"]
+
+# 대시보드에서 KV 네임스페이스를 만든 뒤 id 를 채우세요.
+# (wrangler 로 배포할 때만 필요. 대시보드로 만들면 UI 에서 바인딩하면 됩니다.)
+[[kv_namespaces]]
+binding = "STORE"
+id = "여기에_KV_네임스페이스_ID"

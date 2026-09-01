@@ -287,6 +287,32 @@ function extraCard(x) {
 let last = null;          // 마지막으로 성공한 usage.json
 let statusLocked = false; // 갱신 진행 문구를 표시하는 동안 render() 가 덮지 않도록
 
+// ── 즉시 갱신 (새로고침 버튼이 실제로 Actions 를 실행) ──────────
+// 토큰은 이 폰의 localStorage 에만 저장된다. 저장소나 페이지에는 포함되지 않는다.
+const GH_TOKEN_KEY = "gh-token";
+const WORKER_URL_KEY = "worker-url";
+const WORKER_KEY_KEY = "worker-key";
+const ls = (k) => { try { return localStorage.getItem(k) || ""; } catch { return ""; } };
+const ghToken = () => ls(GH_TOKEN_KEY);
+const workerCfg = () => {
+  const url = ls(WORKER_URL_KEY), key = ls(WORKER_KEY_KEY);
+  return url && key ? { url: url.replace(/\/+$/, ""), key } : null;
+};
+
+/** Worker 를 통해 사용량을 직접 조회한다(1~2초). 성공하면 last 를 갱신. */
+async function loadViaWorker() {
+  const w = workerCfg();
+  if (!w) return false;
+  const res = await fetch(`${w.url}/?k=${encodeURIComponent(w.key)}&t=${Date.now()}`, { cache: "no-store" });
+  if (res.status === 401) throw new Error("APP_KEY 가 맞지 않아요");
+  if (!res.ok) throw new Error(`Worker 오류 (HTTP ${res.status})`);
+  const body = await res.json();
+  if (!body.data) throw new Error(body.error || "Worker 가 데이터를 주지 않았어요");
+  last = body;
+  try { localStorage.setItem("usage-cache", JSON.stringify(last)); } catch {}
+  return true;
+}
+
 function render() {
   const now = Date.now();
   if (!last) { $("empty").classList.add("show"); return; }
@@ -314,6 +340,16 @@ function render() {
 async function load(manual = false) {
   const btn = $("refresh-btn");
   if (manual) btn.classList.add("spinning");
+  // Worker 가 설정돼 있으면 항상 최신값을 직접 가져온다.
+  if (typeof workerCfg === "function" && workerCfg()) {
+    try {
+      await loadViaWorker();
+      $("offline").classList.remove("show");
+      if (manual) btn.classList.remove("spinning");
+      render();
+      return;
+    } catch { /* 실패하면 아래의 usage.json 경로로 폴백 */ }
+  }
   try {
     const res = await fetch(`usage.json?t=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -341,10 +377,6 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
-// ── 즉시 갱신 (새로고침 버튼이 실제로 Actions 를 실행) ──────────
-// 토큰은 이 폰의 localStorage 에만 저장된다. 저장소나 페이지에는 포함되지 않는다.
-const GH_TOKEN_KEY = "gh-token";
-const ghToken = () => { try { return localStorage.getItem(GH_TOKEN_KEY) || ""; } catch { return ""; } };
 
 // GitHub Pages 주소(계정.github.io/저장소/)에서 owner/repo 를 유도
 function repoInfo() {
@@ -404,6 +436,24 @@ async function triggerRefresh(onStatus) {
 async function onRefreshClick() {
   const btn = $("refresh-btn");
   if (btn.dataset.busy === "1") return;
+  if (workerCfg()) {                        // Worker 가 있으면 직접 조회 (가장 빠름)
+    btn.dataset.busy = "1";
+    btn.classList.add("spinning");
+    statusLocked = true;
+    $("updated").textContent = "조회 중…";
+    try {
+      await loadViaWorker();
+      statusLocked = false;
+      render();
+    } catch (e) {
+      $("updated").textContent = e.message || "조회 실패";
+      setTimeout(() => { statusLocked = false; render(); }, 4000);
+    } finally {
+      btn.classList.remove("spinning");
+      btn.dataset.busy = "0";
+    }
+    return;
+  }
   if (!ghToken()) { load(true); return; }   // 토큰이 없으면 기존처럼 파일만 다시 읽기
 
   btn.dataset.busy = "1";
@@ -426,39 +476,59 @@ async function onRefreshClick() {
 
 function renderToken() {
   const body = $("token-body");
-  const r = repoInfo();
-  if (!r) { $("token-card").hidden = true; return; }
+  const w = workerCfg();
 
-  if (ghToken()) {
+  // 1) Worker 가 설정된 상태 - 가장 빠른 경로
+  if (w) {
     body.innerHTML = `
-      <span class="ok">✅ 켜져 있어요</span> - 새로고침을 누르면 실제로 새로 조회합니다 (20~60초 소요).<br><br>
-      <button id="btn-token-clear">토큰 삭제</button>`;
-    $("btn-token-clear").onclick = () => {
-      try { localStorage.removeItem(GH_TOKEN_KEY); } catch {}
+      <span class="ok">⚡ Worker 연결됨</span> - 새로고침이 1~2초면 끝납니다.<br>
+      <span style="color:var(--muted);font-size:12px">${esc(w.url)}</span><br><br>
+      <button id="btn-w-test">연결 테스트</button>
+      <button id="btn-w-clear">연결 해제</button>`;
+    $("btn-w-test").onclick = async () => {
+      const b = $("btn-w-test");
+      b.textContent = "확인 중…";
+      try { await loadViaWorker(); render(); b.textContent = "✅ 정상"; }
+      catch (e) { b.textContent = "❌ " + (e.message || "실패"); }
+    };
+    $("btn-w-clear").onclick = () => {
+      try { localStorage.removeItem(WORKER_URL_KEY); localStorage.removeItem(WORKER_KEY_KEY); } catch {}
       renderToken();
     };
     return;
   }
 
+  // 2) Worker 미설정 - 설정 안내 (+ 기존 GitHub 토큰 방식도 유지)
+  const usingGh = !!ghToken();
   body.innerHTML = `
-    지금 새로고침 버튼은 저장된 데이터를 다시 읽기만 해요.
-    아래를 설정하면 버튼을 누를 때 <strong>실제로 새로 조회</strong>합니다.
+    Cloudflare Worker 를 연결하면 새로고침이 <strong>1~2초</strong>로 끝나고,
+    5분마다 자동 갱신도 안정적으로 돕니다.
     <ol>
-      <li><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub 토큰 만들기</a>
-        → Repository access: <code>${esc(r.owner)}/${esc(r.repo)}</code> 선택
-        → Permissions: <strong>Actions</strong> 를 <strong>Read and write</strong> 로</li>
-      <li>만들어진 <code>github_pat_...</code> 를 아래에 붙여넣기</li>
+      <li>저장소의 <code>worker/README.md</code> 순서대로 Worker 를 만드세요 (약 10분)</li>
+      <li>완성된 주소와 APP_KEY 를 아래에 입력</li>
     </ol>
-    <textarea id="token-input" placeholder="github_pat_..." style="height:56px"></textarea>
-    <button id="btn-token-save">저장</button>
-    <p style="color:var(--muted);font-size:12px;margin:8px 0 0">
-      토큰은 이 폰에만 저장되고 어디에도 공개되지 않아요.</p>`;
-  $("btn-token-save").onclick = () => {
-    const v = $("token-input").value.trim();
-    if (!v) return;
-    try { localStorage.setItem(GH_TOKEN_KEY, v); } catch {}
-    defaultBranch = null;
-    renderToken();
+    <input id="w-url" placeholder="https://claude-usage.계정.workers.dev"
+      style="width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--page);color:var(--ink);font:inherit;font-size:13px">
+    <input id="w-key" placeholder="APP_KEY"
+      style="width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--page);color:var(--ink);font:inherit;font-size:13px">
+    <div style="margin-top:8px"><button id="btn-w-save">연결하고 확인</button></div>
+    <p id="w-msg" style="color:var(--muted);font-size:12px;margin:8px 0 0">
+      입력한 값은 이 폰에만 저장됩니다.
+      ${usingGh ? "현재는 GitHub 토큰 방식(20~60초)으로 동작 중이에요." : ""}</p>`;
+  $("btn-w-save").onclick = async () => {
+    const url = $("w-url").value.trim(), key = $("w-key").value.trim();
+    const msg = $("w-msg");
+    if (!url || !key) { msg.textContent = "주소와 APP_KEY 를 모두 입력해 주세요."; return; }
+    msg.textContent = "연결 확인 중…";
+    try { localStorage.setItem(WORKER_URL_KEY, url); localStorage.setItem(WORKER_KEY_KEY, key); } catch {}
+    try {
+      await loadViaWorker();
+      render();
+      renderToken();
+    } catch (e) {
+      try { localStorage.removeItem(WORKER_URL_KEY); localStorage.removeItem(WORKER_KEY_KEY); } catch {}
+      msg.textContent = "❌ " + (e.message || "연결 실패") + " - 주소와 APP_KEY 를 확인해 주세요.";
+    }
   };
 }
 renderToken();
