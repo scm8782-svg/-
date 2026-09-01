@@ -149,7 +149,8 @@ const json = (body, status = 200) =>
 
 /** 타이밍 노출을 줄이기 위한 상수시간 비교 */
 export function safeEqual(a, b) {
-  const x = String(a ?? ""), y = String(b ?? "");
+  // 붙여넣기 과정에서 앞뒤 공백·줄바꿈이 섞이는 일이 잦아 무시한다.
+  const x = String(a ?? "").trim(), y = String(b ?? "").trim();
   if (x.length !== y.length) return false;
   let diff = 0;
   for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
@@ -164,7 +165,7 @@ export async function handleRequest(request, env, fetchImpl = fetch, now = Date.
 
   const url = new URL(request.url);
   if (!safeEqual(url.searchParams.get("k"), env.APP_KEY)) {
-    return json({ error: "unauthorized" }, 401);
+    return json({ error: "unauthorized", hint: "URL 의 k 값과 APP_KEY 시크릿이 다릅니다" }, 401);
   }
 
   // 최근 결과가 아주 신선하면 그대로 돌려준다(Anthropic 429 예방).

@@ -193,3 +193,16 @@ test("시크릿이 없으면 무엇이 빠졌는지 알려준다", async () => {
   assert.equal(r2.status, 500);
   assert.match((await r2.json()).error, /CLAUDE_CREDENTIALS/);
 });
+
+test("APP_KEY 앞뒤 공백·줄바꿈은 무시한다", async () => {
+  const f = mockFetch([{ match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) }]);
+  const env = envWith(fakeKV(), { APP_KEY: "  secret-key\n" }); // 시크릿에 공백이 섞인 경우
+  const res = await handleRequest(req("k=secret-key"), env, f);
+  assert.equal(res.status, 200);
+});
+
+test("키가 다르면 이유를 알려준다", async () => {
+  const res = await handleRequest(req("k=nope"), envWith(fakeKV()), mockFetch([]));
+  assert.equal(res.status, 401);
+  assert.match((await res.json()).hint, /APP_KEY/);
+});
