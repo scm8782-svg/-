@@ -18,7 +18,14 @@ GitHub cron 보다 안정적으로 동작합니다.
 3. 만들어진 Worker → **Edit code** → 편집기 내용을 전부 지우고
    이 폴더의 `src/worker.js` 내용을 통째로 붙여넣기 → **Deploy**
 
-### 2. KV 저장소 연결
+> 만드는 화면에서 **GitHub 저장소 연결(Import a repository)** 이 아니라
+> **Hello World / 템플릿으로 시작** 을 고르세요. 저장소 연결 방식은
+> 빌드 루트와 KV ID 를 미리 맞춰야 해서 더 번거롭습니다.
+
+### 2. KV 저장소 연결 (권장)
+
+KV 를 연결하지 않아도 동작하지만, 갱신된 토큰과 캐시가 남지 않아
+호출이 잦아지고 언젠가 토큰이 만료될 수 있습니다. 연결해 두는 편이 좋습니다.
 
 1. 좌측 **Storage & Databases** → **KV** → **Create namespace** → 이름 `claude-usage-store`
 2. Worker → **Settings** → **Bindings** → **Add** → **KV namespace**

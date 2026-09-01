@@ -172,3 +172,24 @@ test("parseCredentials 는 두 형식을 모두 받는다", () => {
   assert.equal(parseCredentials("sk-ant-oat01-a").static, true);
   assert.equal(parseCredentials(JSON.stringify({ claudeAiOauth: { accessToken: "x" } })).accessToken, "x");
 });
+
+test("KV 바인딩이 없어도 동작한다(임시 저장소로 폴백)", async () => {
+  const f = mockFetch([{ match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) }]);
+  const env = {
+    APP_KEY: "secret-key",
+    CLAUDE_CREDENTIALS: JSON.stringify({ claudeAiOauth: { accessToken: "at", expiresAt: Date.now() + 3_600_000 } }),
+  }; // STORE 없음
+  const res = await handleRequest(req("k=secret-key"), env, f);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).data.five_hour.utilization, 24);
+});
+
+test("시크릿이 없으면 무엇이 빠졌는지 알려준다", async () => {
+  const r1 = await handleRequest(req("k=x"), { STORE: fakeKV() }, mockFetch([]));
+  assert.equal(r1.status, 500);
+  assert.match((await r1.json()).error, /APP_KEY/);
+
+  const r2 = await handleRequest(req("k=secret-key"), { STORE: fakeKV(), APP_KEY: "secret-key" }, mockFetch([]));
+  assert.equal(r2.status, 500);
+  assert.match((await r2.json()).error, /CLAUDE_CREDENTIALS/);
+});

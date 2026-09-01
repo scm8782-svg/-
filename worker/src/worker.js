@@ -21,6 +21,15 @@ const CACHE_TTL_MS = 15_000;
 const KEY_CREDS = "creds";
 const KEY_USAGE = "usage";
 
+// KV 바인딩(STORE)이 아직 없어도 동작하도록 한 임시 저장소.
+// 프로세스가 살아 있는 동안만 유지되므로 KV 를 연결하는 편이 좋다.
+const memory = new Map();
+const storeOf = (env) =>
+  env.STORE ?? {
+    get: async (k) => memory.get(k) ?? null,
+    put: async (k, v) => void memory.set(k, v),
+  };
+
 export function parseCredentials(raw) {
   const text = (raw ?? "").trim();
   if (!text) throw new Error("CLAUDE_CREDENTIALS 가 비어 있습니다.");
@@ -104,8 +113,9 @@ export async function fetchUsage(creds, fetchImpl, opts = {}) {
  */
 export async function refreshAndStore(env, fetchImpl, now = Date.now(), opts = {}) {
   const fromSecret = parseCredentials(env.CLAUDE_CREDENTIALS);
+  const store = storeOf(env);
   let stored = null;
-  const raw = await env.STORE.get(KEY_CREDS);
+  const raw = await store.get(KEY_CREDS);
   if (raw) {
     try { stored = parseCredentials(raw); } catch { /* 손상된 값은 무시 */ }
   }
@@ -114,9 +124,9 @@ export async function refreshAndStore(env, fetchImpl, now = Date.now(), opts = {
   for (const creds of stored ? [stored, fromSecret] : [fromSecret]) {
     try {
       const { creds: finalCreds, data } = await fetchUsage(creds, fetchImpl, { ...opts, now });
-      if (!finalCreds.static) await env.STORE.put(KEY_CREDS, JSON.stringify(finalCreds));
+      if (!finalCreds.static) await store.put(KEY_CREDS, JSON.stringify(finalCreds));
       const payload = { version: 1, fetched_at: new Date(now).toISOString(), data };
-      await env.STORE.put(KEY_USAGE, JSON.stringify(payload));
+      await store.put(KEY_USAGE, JSON.stringify(payload));
       return payload;
     } catch (e) {
       lastErr = e;
@@ -149,13 +159,16 @@ export function safeEqual(a, b) {
 export async function handleRequest(request, env, fetchImpl = fetch, now = Date.now()) {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders() });
 
+  if (!env.APP_KEY) return json({ error: "APP_KEY 시크릿이 설정되지 않았습니다" }, 500);
+  if (!env.CLAUDE_CREDENTIALS) return json({ error: "CLAUDE_CREDENTIALS 시크릿이 설정되지 않았습니다" }, 500);
+
   const url = new URL(request.url);
   if (!safeEqual(url.searchParams.get("k"), env.APP_KEY)) {
     return json({ error: "unauthorized" }, 401);
   }
 
   // 최근 결과가 아주 신선하면 그대로 돌려준다(Anthropic 429 예방).
-  const cachedRaw = await env.STORE.get(KEY_USAGE);
+  const cachedRaw = await storeOf(env).get(KEY_USAGE);
   let cached = null;
   if (cachedRaw) {
     try { cached = JSON.parse(cachedRaw); } catch {}
