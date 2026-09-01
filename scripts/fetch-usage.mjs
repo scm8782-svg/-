@@ -21,8 +21,6 @@ const TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
 // Claude Code 의 공개 OAuth client id (비밀값 아님)
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const DEFAULT_UA = "claude-code/2.1.0";
-// 만료 5분 전부터는 미리 갱신
-const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 /** 시크릿 문자열을 자격증명 객체로 해석한다. */
 export function parseCredentials(raw) {
@@ -48,11 +46,6 @@ export function parseCredentials(raw) {
   };
 }
 
-export function needsRefresh(creds, now = Date.now()) {
-  if (creds.static || !creds.refreshToken) return false;
-  if (creds.expiresAt == null) return false;
-  return creds.expiresAt - now < REFRESH_MARGIN_MS;
-}
 
 /** GitHub Actions 로그에서 토큰이 노출되지 않도록 마스킹한다. */
 function maskInLogs(value) {
@@ -119,9 +112,8 @@ export async function fetchUsage(creds, fetchImpl, opts = {}) {
   const { now = Date.now(), ua = DEFAULT_UA, retryDelayMs = 35_000, sleepImpl = sleep, refreshRetryDelays } = opts;
   const refreshOpts = { sleepImpl, ...(refreshRetryDelays ? { retryDelays: refreshRetryDelays } : {}) };
   let current = { ...creds };
-  if (needsRefresh(current, now)) {
-    current = await refreshToken(current, fetchImpl, now, refreshOpts);
-  }
+  // 저장된 만료시각은 틀릴 수 있으므로 일단 조회부터 시도한다.
+  // 불필요한 갱신은 Anthropic 토큰 엔드포인트의 429 를 유발한다.
   let res = await getUsageOnce(current.accessToken, fetchImpl, ua);
   if (res.status === 401 && current.refreshToken) {
     current = await refreshToken(current, fetchImpl, now, refreshOpts);

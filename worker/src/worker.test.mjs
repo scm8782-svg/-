@@ -206,3 +206,46 @@ test("키가 다르면 이유를 알려준다", async () => {
   assert.equal(res.status, 401);
   assert.match((await res.json()).hint, /APP_KEY/);
 });
+
+test("액세스 토큰이 살아 있으면 갱신하지 않는다(만료시각이 지났어도)", async () => {
+  let tokenCalls = 0;
+  const f = mockFetch([
+    { match: "/v1/oauth/token", respond: () => (tokenCalls++, jsonRes(200, { access_token: "x", expires_in: 1 })) },
+    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+  ]);
+  const env = {
+    STORE: fakeKV(),
+    APP_KEY: "secret-key",
+    // 만료시각이 한참 지났지만 토큰은 아직 유효한 상황
+    CLAUDE_CREDENTIALS: JSON.stringify({ claudeAiOauth: { accessToken: "at", refreshToken: "rt", expiresAt: 1 } }),
+  };
+  const res = await handleRequest(req("k=secret-key"), env, f);
+  assert.equal(res.status, 200);
+  assert.equal(tokenCalls, 0, "불필요한 토큰 갱신을 하지 않아야 한다");
+});
+
+test("갱신이 429 면 쿨다운을 기록하고, 그동안은 갱신을 재시도하지 않는다", async () => {
+  const kv = fakeKV();
+  let tokenCalls = 0;
+  const f = mockFetch([
+    { match: "/v1/oauth/token", respond: () => (tokenCalls++, jsonRes(429, { error: "rate" })) },
+    { match: "/api/oauth/usage", respond: () => jsonRes(401, {}) },
+  ]);
+  const env = {
+    STORE: kv,
+    APP_KEY: "secret-key",
+    CLAUDE_CREDENTIALS: JSON.stringify({ claudeAiOauth: { accessToken: "at", refreshToken: "rt", expiresAt: 1 } }),
+  };
+  const now = 1_000_000;
+  const r1 = await handleRequest(req("k=secret-key"), env, f, now);
+  assert.equal(r1.status, 502);
+  const after = tokenCalls;
+  assert.ok(after > 0, "첫 요청은 갱신을 시도한다");
+  assert.ok(Number(kv._dump()[ "refresh-cooldown-until" ]) > now, "쿨다운이 기록된다");
+
+  // 쿨다운 중에는 토큰 엔드포인트를 더 두드리지 않는다
+  const r2 = await handleRequest(req("k=secret-key"), env, f, now + 1000);
+  assert.equal(r2.status, 502);
+  assert.equal(tokenCalls, after, "쿨다운 중에는 갱신을 시도하지 않아야 한다");
+  assert.match((await r2.json()).error, /대기 중/);
+});

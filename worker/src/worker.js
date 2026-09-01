@@ -14,12 +14,14 @@ const TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
 // Claude Code 의 공개 OAuth client id (비밀값 아님)
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const DEFAULT_UA = "claude-code/2.1.0";
-const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 // 같은 결과를 이 시간 안에 다시 요청하면 Anthropic 을 부르지 않는다(429 예방).
 const CACHE_TTL_MS = 15_000;
 
 const KEY_CREDS = "creds";
 const KEY_USAGE = "usage";
+const KEY_COOLDOWN = "refresh-cooldown-until";
+// 갱신이 429 로 막히면 이 시간 동안은 갱신을 다시 시도하지 않는다.
+const REFRESH_COOLDOWN_MS = 10 * 60 * 1000;
 
 // KV 바인딩(STORE)이 아직 없어도 동작하도록 한 임시 저장소.
 // 프로세스가 살아 있는 동안만 유지되므로 KV 를 연결하는 편이 좋다.
@@ -47,10 +49,6 @@ export function parseCredentials(raw) {
   };
 }
 
-export function needsRefresh(creds, now) {
-  if (creds.static || !creds.refreshToken || creds.expiresAt == null) return false;
-  return creds.expiresAt - now < REFRESH_MARGIN_MS;
-}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -94,12 +92,14 @@ async function getUsageOnce(token, fetchImpl, ua) {
 
 /** 자격증명으로 사용량을 조회한다. 401 이면 갱신 후 1회 재시도. */
 export async function fetchUsage(creds, fetchImpl, opts = {}) {
-  const { now = Date.now(), ua = DEFAULT_UA } = opts;
+  const { now = Date.now(), ua = DEFAULT_UA, refreshAllowed = true } = opts;
   let current = { ...creds };
-  if (needsRefresh(current, now)) current = await refreshToken(current, fetchImpl, now, opts);
 
+  // 저장된 만료시각은 틀릴 수 있으므로 일단 조회를 시도하고,
+  // 실제로 401 이 났을 때만 갱신한다(불필요한 갱신이 429 를 부른다).
   let res = await getUsageOnce(current.accessToken, fetchImpl, ua);
   if (res.status === 401 && current.refreshToken) {
+    if (!refreshAllowed) throw new Error("토큰 갱신 대기 중 (429 로 잠시 중단)");
     current = await refreshToken(current, fetchImpl, now, opts);
     res = await getUsageOnce(current.accessToken, fetchImpl, ua);
   }
@@ -120,16 +120,24 @@ export async function refreshAndStore(env, fetchImpl, now = Date.now(), opts = {
     try { stored = parseCredentials(raw); } catch { /* 손상된 값은 무시 */ }
   }
 
+  const cooldownRaw = await store.get(KEY_COOLDOWN);
+  const cooldownUntil = cooldownRaw ? Number(cooldownRaw) : 0;
+  const refreshAllowed = !(cooldownUntil > now);
+
   let lastErr;
   for (const creds of stored ? [stored, fromSecret] : [fromSecret]) {
     try {
-      const { creds: finalCreds, data } = await fetchUsage(creds, fetchImpl, { ...opts, now });
+      const { creds: finalCreds, data } = await fetchUsage(creds, fetchImpl, { ...opts, now, refreshAllowed });
       if (!finalCreds.static) await store.put(KEY_CREDS, JSON.stringify(finalCreds));
       const payload = { version: 1, fetched_at: new Date(now).toISOString(), data };
       await store.put(KEY_USAGE, JSON.stringify(payload));
       return payload;
     } catch (e) {
       lastErr = e;
+      if (/HTTP 429/.test(String(e.message))) {
+        await store.put(KEY_COOLDOWN, String(now + REFRESH_COOLDOWN_MS));
+        break; // 429 면 다른 자격증명으로 더 시도해봐야 상황만 악화된다
+      }
     }
   }
   throw lastErr;

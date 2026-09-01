@@ -1,7 +1,7 @@
 // node --test scripts/ 로 실행되는 단위 테스트 (네트워크 호출은 전부 모킹)
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseCredentials, needsRefresh, fetchUsage, run } from "./fetch-usage.mjs";
+import { parseCredentials, fetchUsage, run } from "./fetch-usage.mjs";
 
 const USAGE = {
   five_hour: { utilization: 42, resets_at: "2026-08-31T18:00:00Z" },
@@ -34,7 +34,6 @@ test("장기 토큰(sk-ant-...) 문자열을 해석한다", () => {
   const c = parseCredentials("  sk-ant-oat01-abc  ");
   assert.equal(c.accessToken, "sk-ant-oat01-abc");
   assert.equal(c.static, true);
-  assert.equal(needsRefresh(c), false);
 });
 
 test("credentials.json (claudeAiOauth 래핑) 을 해석한다", () => {
@@ -44,7 +43,6 @@ test("credentials.json (claudeAiOauth 래핑) 을 해석한다", () => {
   const c = parseCredentials(raw);
   assert.equal(c.accessToken, "at");
   assert.equal(c.refreshToken, "rt");
-  assert.equal(needsRefresh(c, 900), true); // 만료 임박
 });
 
 test("유효한 토큰이면 갱신 없이 바로 조회한다", async () => {
@@ -59,7 +57,7 @@ test("유효한 토큰이면 갱신 없이 바로 조회한다", async () => {
   assert.match(f.calls[0].opts.headers["User-Agent"], /^claude-code\//);
 });
 
-test("만료된 토큰이면 먼저 갱신한 뒤 조회한다", async () => {
+test("401 을 받으면 갱신한 뒤 다시 조회한다", async () => {
   const f = mockFetch([
     {
       match: "/v1/oauth/token",
@@ -70,7 +68,10 @@ test("만료된 토큰이면 먼저 갱신한 뒤 조회한다", async () => {
         return jsonRes(200, { access_token: "at2", refresh_token: "rt2", expires_in: 28800 });
       },
     },
-    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+    {
+      match: "/api/oauth/usage",
+      respond: (_, opts) => (opts.headers.Authorization === "Bearer old" ? jsonRes(401, {}) : jsonRes(200, USAGE)),
+    },
   ]);
   const now = Date.now();
   const creds = { accessToken: "old", refreshToken: "rt", expiresAt: now - 1, static: false };
@@ -78,6 +79,19 @@ test("만료된 토큰이면 먼저 갱신한 뒤 조회한다", async () => {
   assert.equal(updated.accessToken, "at2");
   assert.equal(updated.refreshToken, "rt2");
   assert.ok(updated.expiresAt > now);
+});
+
+test("액세스 토큰이 살아 있으면 만료시각이 지났어도 갱신하지 않는다", async () => {
+  let tokenCalls = 0;
+  const f = mockFetch([
+    { match: "/v1/oauth/token", respond: () => (tokenCalls++, jsonRes(200, { access_token: "x" })) },
+    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+  ]);
+  const now = Date.now();
+  const creds = { accessToken: "still-good", refreshToken: "rt", expiresAt: now - 999_999, static: false };
+  const { data } = await fetchUsage(creds, f, { now });
+  assert.equal(data.five_hour.utilization, 42);
+  assert.equal(tokenCalls, 0);
 });
 
 test("401 이면 강제 갱신 후 1회 재시도한다", async () => {
@@ -125,7 +139,11 @@ test("상태 파일 자격증명이 죽었으면 시크릿으로 폴백한다", 
           : jsonRes(200, { access_token: "at-new", refresh_token: "rt-new", expires_in: 100 });
       },
     },
-    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+    {
+      match: "/api/oauth/usage",
+      respond: (_, opts) =>
+        opts.headers.Authorization === "Bearer at-new" ? jsonRes(200, USAGE) : jsonRes(401, {}),
+    },
   ]);
   const now = Date.now();
   const state = JSON.stringify({ accessToken: "at-dead", refreshToken: "rt-dead", expiresAt: now - 1 });
@@ -154,7 +172,10 @@ test("토큰 갱신이 429 면 백오프 후 재시도한다", async () => {
           ? jsonRes(429, { error: { type: "rate_limit_error" } })
           : jsonRes(200, { access_token: "at-ok", expires_in: 28800 }),
     },
-    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+    {
+      match: "/api/oauth/usage",
+      respond: (_, opts) => (opts.headers.Authorization === "Bearer old" ? jsonRes(401, {}) : jsonRes(200, USAGE)),
+    },
   ]);
   const now = Date.now();
   const creds = { accessToken: "old", refreshToken: "rt", expiresAt: now - 1, static: false };
@@ -171,7 +192,7 @@ test("토큰 갱신이 429 면 백오프 후 재시도한다", async () => {
 test("토큰 갱신 429 가 재시도 횟수를 넘으면 실패한다", async () => {
   const f = mockFetch([
     { match: "/v1/oauth/token", respond: () => jsonRes(429, { error: "rate" }) },
-    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+    { match: "/api/oauth/usage", respond: () => jsonRes(401, {}) },
   ]);
   const now = Date.now();
   const creds = { accessToken: "old", refreshToken: "rt", expiresAt: now - 1, static: false };
@@ -185,7 +206,7 @@ test("토큰 갱신이 429 아닌 오류면 즉시 실패한다", async () => {
   let tokenCalls = 0;
   const f = mockFetch([
     { match: "/v1/oauth/token", respond: () => (tokenCalls++, jsonRes(400, { error: "invalid_grant" })) },
-    { match: "/api/oauth/usage", respond: () => jsonRes(200, USAGE) },
+    { match: "/api/oauth/usage", respond: () => jsonRes(401, {}) },
   ]);
   const now = Date.now();
   const creds = { accessToken: "old", refreshToken: "rt", expiresAt: now - 1, static: false };
