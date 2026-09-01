@@ -143,7 +143,11 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: 조회 실패 여부 알림
+      # 앱은 배포하되, 데이터를 못 가져왔다면 실행을 실패로 남긴다.
+      # (초록불로 가려지면 토큰 만료 같은 문제를 며칠씩 모르고 지나간다)
+      - name: 조회 실패 시 실행을 실패로 표시
         if: ${{ steps.fetch.outcome == 'failure' }}
         run: |
-          echo "::warning::사용량 조회에 실패했습니다(앱은 정상 배포됨). 다음 주기에 다시 시도합니다."
+          echo "::error::사용량 조회 실패 - 앱은 배포됐지만 데이터는 예전 것입니다."
+          echo "토큰이 만료됐을 수 있습니다. CLAUDE_CREDENTIALS 시크릿을 새 값으로 교체해 보세요."
+          exit 1
